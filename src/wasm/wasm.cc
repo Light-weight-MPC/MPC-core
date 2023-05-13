@@ -22,8 +22,7 @@ string simulate(string sce_file, string sys_file, string sce, string ref_str, in
     std::map<string, int> m_map;
 
     // Scenario variables:
-    VectorXd z_min; /** Lower constraint vector */
-    VectorXd z_max; /** Upper constraint vector */
+    VectorXd z_min, z_max; /** Constraint vectors */
     MPCConfig conf; /** MPC configuration */
 
     // Parse information:
@@ -33,30 +32,34 @@ string simulate(string sce_file, string sys_file, string sce, string ref_str, in
     catch(std::exception& e) {
         return string(e.what());
     }
-    MatrixXd du_tilde = MatrixXd::Zero(m_map[kN_MV], m_map[kN]-conf.W-1);
 
-    // Select dynamical model: 
-    FSRModel fsr(cvd.getSR(), m_map, conf.P, conf.M, conf.W, mvd.Inits, cvd.getInits());
-    fsr.setDuTildeMat(du_tilde);
+    // FSRM:
+    MPCConfig sim_conf = conf;
+    FSRModel* fsr_cost;
+    bool reduced_cost = (conf.W != 0);
+    if (reduced_cost) {
+        fsr_cost = new FSRModel(cvd.getSR(), m_map, conf, mvd.Inits, cvd.getInits());
+        sim_conf.W = 0;
+    } 
+    FSRModel fsr_sim(cvd.getSR(), m_map, sim_conf, mvd.Inits, cvd.getInits());
 
     // MPC variables:
-    MatrixXd u_mat; /** Optimized actuation, (n_MV, T) */
-    MatrixXd y_pred; /** Predicted output (n_CV, T)*/
+    MatrixXd u_mat, y_pred, ref = ParseReferenceStr(ref_str, T, conf.P);
 
-    // Reference: 
-    VectorXd* y_ref = ParseReferenceStrByAllocation(ref_str, T, conf.P);
-
-    // Solver: 
-    try {
-        SRSolver(T, u_mat, y_pred, fsr, conf, z_min, z_max, y_ref);
-        delete[] y_ref;
+    try { // Solve:
+        if (reduced_cost) {
+            SRSolver(T, u_mat, y_pred, fsr_sim, *fsr_cost, conf, z_min, z_max, ref);
+            delete fsr_cost;
+        } else {
+            SRSolver(T, u_mat, y_pred, fsr_sim, conf, z_min, z_max, ref);
+        }
     }
     catch(std::exception& e) {
         return string(e.what());
     }
     
     return SerializeSimulation(sce, cvd, mvd, 
-              y_pred, u_mat, z_min, z_max, fsr, T);
+              y_pred, u_mat, z_min, z_max, ref, fsr_sim, T);
 }
 
 // webassembly.mjs: Functions added into EMCRIPTEN_BINDINGS are compiled to JS using Webassembly.

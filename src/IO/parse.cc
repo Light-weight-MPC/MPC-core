@@ -7,13 +7,13 @@
 
 #include "IO/parse.h"
 #include "IO/json_specifiers.h"
-#include "IO/data_objects.h"
 
 #include <map>
 #include <vector>
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
+#include <algorithm>
 
 /**
  * @brief function obtaining model data from system file
@@ -31,6 +31,22 @@ static void ModelData(const json& sys_data, std::map<string,int>& map) {
     catch(json::exception& e) {
         std::cerr << e.what() << std::endl; 
     }    
+}
+
+/**
+ * @brief Checks if std::string is double or int
+ * 
+ * @param str string to be tested
+ * @return true 
+ * @return false 
+ */
+static bool IsDigit(string str) {
+    for (auto &ch : str) {
+        if (!isdigit(ch) && ch != '.') {
+            return false;
+        }
+    }
+    return true; 
 }
 
 /**
@@ -64,9 +80,7 @@ static void ParseSystemData(const json& sys_data, std::map<string, int>& m_map,
                     CVData& output_data, MVData& input_data) {
     try {
         ModelData(sys_data, m_map);
-        json cv_data = sys_data.at(kCV);
-        json mv_data = sys_data.at(kMV);
-
+        json cv_data = sys_data.at(kCV), mv_data = sys_data.at(kMV);
         output_data = CVData(cv_data, m_map[kN_MV], m_map[kN_CV], m_map[kN]);
         input_data = MVData(mv_data, m_map[kN_MV]); 
     }
@@ -84,8 +98,8 @@ static void ParseSystemData(const json& sys_data, std::map<string, int>& m_map,
  * @param sce_data json object of scenario file
  * @param system corresponding system file
  * @param mpc_conf MPCConfig object
- * @param z_min Eigen::VectorXF 
- * @param z_max Eigen::VectorXf
+ * @param z_min Eigen::VectorXd lower constraint
+ * @param z_max Eigen::VectorXd upper constraint 
  */
 static void ParseScenarioData(const json& sce_data, string& system, MPCConfig& mpc_config, 
                         VectorXd& z_min, VectorXd& z_max) {
@@ -105,10 +119,9 @@ static void ParseScenarioData(const json& sce_data, string& system, MPCConfig& m
  * 
  * @param sim_data [json] object holding json data
  * @param du_tilde [Eigen::MatrixXd] matrix holding previous actuations
- * @param cvd CVData
  * @param mvd MVData
  */
-static void ParseSimulationData(const json& sim_data, MatrixXd& du_tilde, CVData& cvd, MVData& mvd) {
+static void ParseSimulationData(const json& sim_data, MatrixXd& du_tilde, MVData& mvd) {
     try {               
         // Read du_tilde and yT, dT
         json du_tilde_data = sim_data.at(kDuTilde);
@@ -122,16 +135,8 @@ static void ParseSimulationData(const json& sim_data, MatrixXd& du_tilde, CVData
             }
         }
 
-        json cv_data = sim_data.at(kCV);
+        json mv_data = sim_data.at(kMV); // Only need information about du and u to simulate further
         int i = 0;
-        for (auto& cv : cv_data) {
-            json y_arr = cv.at(kY_pred); // Should be changed to "y"
-            cvd.setInits(y_arr.at(y_arr.size()-1), i);
-            i++;
-        }
-
-        json mv_data = sim_data.at(kMV);
-        i = 0;
         for (auto& mv : mv_data) {
             json u_arr = mv.at(kU);
             mvd.setInits(u_arr.at(u_arr.size()-1), i);
@@ -149,7 +154,7 @@ json ReadJson(const string& filepath) {
         return json::parse(file);
     }
     catch (std::exception& e) {
-        std::cerr << "ERROR! " << e.what() << std::endl; 
+        std::cerr << "ERROR! Cannot read file: " << e.what() << std::endl; 
         return 1;
     }
 }
@@ -161,7 +166,6 @@ void ParseNew(const string& sce_filepath, std::map<string, int>& m_map,
     json sce_data = ReadJson(sce_filepath);
     string system;
     ParseScenarioData(sce_data, system, conf, z_min, z_max);
-   
     // Parse system file
     string sys_filepath = "../data/systems/" + system + ".json";
     json sys_data = ReadJson(sys_filepath);
@@ -189,14 +193,13 @@ void Parse(const string& sce_filepath, const string& sim_filepath, std::map<stri
 
     // Parse simulation file:
     json sim_data = ReadJson(sim_filepath);
-    ParseSimulationData(sim_data, du_tilde, cvd, mvd);
+    ParseSimulationData(sim_data, du_tilde, mvd);
 }
 
-void Parse(const std::string& sce_file, const std::string& sys_file, std::map<std::string, int>& m_map,
+void Parse(const string& sce_file, const string& sys_file, std::map<string, int>& m_map,
                     CVData& cvd, MVData& mvd, MPCConfig& conf, 
                         Eigen::VectorXd& z_min, Eigen::VectorXd& z_max) {
-    json sce_data = json::parse(sce_file); 
-    json sys_data = json::parse(sys_file);
+    json sce_data = json::parse(sce_file), sys_data = json::parse(sys_file); 
 
     string system; // Dummy variable
     ParseScenarioData(sce_data, system, conf, z_min, z_max);
@@ -210,16 +213,40 @@ void ParseOpenLoop(const string& system, std::map<string, int>& m_map, CVData& c
     ParseSystemData(sys_data, m_map, cvd, mvd);
 }
 
-VectorXd* ParseReferenceStrByAllocation(string ref_str, int T, int P) {
-    json ref_data = json::parse(ref_str);
-
-    json ref_vec = ref_data.at(kRef);
+MatrixXd ParseReferenceStr(string ref_str, int T, int P) {
+    json ref_data = json::parse(ref_str), ref_vec = ref_data.at(kRef);
 
     int size = int(ref_vec.size());
-    VectorXd* y_ref = new VectorXd[size];
+    MatrixXd ref = MatrixXd::Zero(size, T + P);
 
     for (int i = 0; i < size; i++) {
-        y_ref[i] = VectorXd::Constant(T + P, ref_vec.at(i)); // Takes predictions into account!
+        ref.row(i) = VectorXd::Constant(T + P, ref_vec.at(i)); // Takes predictions into account!
     }
-    return y_ref;
+    return ref;
 }
+
+std::vector<double> ParseRefString(const string& ref_str, int n_CV) {
+    // Remove whitespaces:
+    string copy = ref_str;
+    if (copy[0] != '[') {
+        throw std::invalid_argument("Missing starting bracket in referece arg!");
+    } else if (copy.back() != ']') {
+        throw std::invalid_argument("Missing enclosing bracket in referece arg!");
+    }
+
+    string stripped = copy.substr(1, copy.size() - 2);
+    const char sep = ',', space = ' ';
+    std::replace(stripped.begin(), stripped.end(), sep, space);
+ 
+    // Split string to std::vector
+    std::vector<double> ref_vec; 
+    std::stringstream ss(stripped);
+    string item;
+    while (ss >> item) {
+        if (IsDigit(item)) {
+            ref_vec.push_back(std::stod(item));
+        }
+    }
+    return ref_vec;
+}
+

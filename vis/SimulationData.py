@@ -8,6 +8,7 @@ SCENARIO = "scenario"
 T = "T"
 N_CV = "n_CV"
 N_MV = "n_MV"
+P = "P"
 
 CV = "CV"
 MV = "MV"
@@ -17,6 +18,7 @@ UNIT = "unit"
 CONSTRAINT = "c"
 Y = "y"
 Y_PRED = "y_pred"
+REF = "ref"
 U = "u"
 
 
@@ -33,14 +35,11 @@ class SimulationData():
         self.T = json_data[T]
         self.n_CV = json_data[N_CV]
         self.n_MV = json_data[N_MV]
+        self.P = json_data[P]
 
-        if (json_data[CV][0].get(CONSTRAINT) is None): # Assume if this is correct for the first then the rest aswell
-            self.plot_constraint = False
-        else:
-            self.plot_constraint = True
-
-        self.y = np.empty([self.n_CV, self.T])
-        self.y_pred = np.empty([self.n_CV, self.T])
+        self.y = np.empty([self.n_CV, self.T + self.P])
+        self.y_pred = np.empty([self.n_CV, self.T + self.P])
+        self.ref = np.empty([self.n_CV, self.T + self.P])
         self.u = np.ndarray([self.n_MV, self.T])
 
         self.ParseCVData(json_data)
@@ -65,12 +64,11 @@ class SimulationData():
         for index, elem in enumerate(cv_data):
             outputs.append(elem[OUTPUT])
             cv_units.append(elem[UNIT])
-
-            if self.plot_constraint:
-                cv_constraints.append((elem[CONSTRAINT][0], elem[CONSTRAINT][1])) # Constraints are stored as python tuples
+            cv_constraints.append((elem[CONSTRAINT][0], elem[CONSTRAINT][1])) # Constraints are stored as python tuples
 
             # Fill nparray
             # self.y.T[..., index] = elem[Y] # Have not implemented reference model yet
+            self.ref.T[..., index] = elem[REF]
             self.y_pred.T[..., index] = elem[Y_PRED]
         self.outputs, self.cv_units, self.cv_constraints = outputs, cv_units, cv_constraints
 
@@ -84,9 +82,7 @@ class SimulationData():
         for index, elem in enumerate(mv_data):
             inputs.append(elem[INPUT])
             mv_units.append(elem[UNIT])
-
-            if self.plot_constraint:
-                mv_constraints.append((elem[CONSTRAINT][0], elem[CONSTRAINT][1]))
+            mv_constraints.append((elem[CONSTRAINT][0], elem[CONSTRAINT][1]))
 
             self.u.T[..., index] = elem[U]
         self.inputs, self.mv_units, self.mv_constraints = inputs, mv_units, mv_constraints

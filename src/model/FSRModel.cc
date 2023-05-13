@@ -7,35 +7,25 @@
 #include "model/FSRModel.h"
 #include "IO/json_specifiers.h"
 
-#include <iostream>
-#include <vector>
-#include <map>
-#include <string>
-
-#include <Eigen/Eigen>
-
-FSRModel::FSRModel(VectorXd** SR, std::map<std::string, int> m_param, int P, int M, int W,
+FSRModel::FSRModel(VectorXd** SR, std::map<string, int> m_param, const MPCConfig& conf,
                    const std::vector<double>& init_u, const std::vector<double>& init_y) :
-                      P_{P}, M_{M}, W_{W} {
+                      P_{conf.P}, M_{conf.M}, W_{conf.W} {
     n_CV_ = m_param[kN_CV];
     n_MV_ = m_param[kN_MV];  
     N_ = m_param[kN];
 
-    theta_ = MatrixXd::Zero(n_CV_*(P-W), n_MV_*M);
-    phi_.resize(n_CV_*(P-W), n_MV_*(N_-W_-1));
-    psi_.resize(n_CV_*(P-W), n_MV_);
-    du_tilde_mat_ = MatrixXd::Zero(n_MV_, N_-W-1);
-
     u_K_ = VectorXd::Map(init_u.data(), init_u.size());
     u_ = VectorXd::Map(init_u.data(), init_u.size());
-    y_ = VectorXd::Map(init_y.data(), init_y.size());
+    y_ = setInitY(init_y, P_ - W_);
 
     AllocateAndDeepCopy(SR); 
     // Setting matrix member variables
     setSRMatrix();
-    setThetaMatrix();
-    setPhiMatrix();
-    setPsi();
+    theta_ = getThetaMatrix(W_);
+    phi_ = getPhiMatrix(W_);
+    psi_ = getPsi(W_);
+
+    du_tilde_mat_ = MatrixXd::Zero(n_MV_, N_-W_-1);  
 }
 
 FSRModel::FSRModel(VectorXd** SR, std::map<std::string, int> m_param, const std::vector<double>& init_u, 
@@ -44,22 +34,19 @@ FSRModel::FSRModel(VectorXd** SR, std::map<std::string, int> m_param, const std:
     n_MV_ = m_param[kN_MV];  
     N_ = m_param[kN];
 
-    theta_ = MatrixXd::Zero(n_CV_*(P_-W_), n_MV_*M_);
-    phi_.resize(n_CV_*(P_-W_), n_MV_*(N_-W_-1));
-    psi_.resize(n_CV_*(P_-W_), n_MV_);
-    du_tilde_mat_ = MatrixXd::Zero(n_MV_, N_-W_-1);
-
-    u_K_ = VectorXd::Map(init_u.data(), init_u.size());
+    u_K_ = VectorXd::Map(init_u.data(), init_u.size()); 
     u_ = VectorXd::Map(init_u.data(), init_u.size());
     y_ = VectorXd::Map(init_y.data(), init_y.size());
 
     AllocateAndDeepCopy(SR); 
-    // Setting matrix member variables
+    // set FSRM matrix variables
     setSRMatrix();
-    setThetaMatrix();
-    setPhiMatrix();
-    setPsi();
-}
+    theta_ = getThetaMatrix();
+    phi_ = getPhiMatrix();
+    psi_ = getPsi();
+
+    du_tilde_mat_ = MatrixXd::Zero(n_MV_, N_-W_-1); 
+}    
 
 FSRModel::~FSRModel() {
     if (n_CV_ != 0 && n_MV_ != 0) {
@@ -96,6 +83,12 @@ void FSRModel::AllocateAndDeepCopy(VectorXd** SR) {
 }
 
 void FSRModel::setLowerTriangularMatrix(const VectorXd& pred_vec, MatrixXd& S) {
+    // S = [[ s1, 0, ..., 0 
+    //        s2, s1, 0,  . 
+    //         ., . ,  ., . 
+    //         sM, sM-1, ..., s1
+    //          ., ., ., . 
+    //         sP, sP-1, ..., sP-M]] (7b) in Light-weight MPC thesis
     int n = 0; 
     for (int i = 0; i < M_; i++) {
         for (int j = 0; j < P_-n; j++) {
@@ -110,42 +103,42 @@ void FSRModel::setSRMatrix() {
         MatrixXd S = MatrixXd::Zero(P_, M_);
         for (int j = 0; j < n_MV_; j++) {
             setLowerTriangularMatrix(pp_SR_vec_[i][j], S);
-            pp_SR_mat_[i][j] = S(Eigen::seq(W_, Eigen::indexing::last), Eigen::seq(0, Eigen::indexing::last));
+            pp_SR_mat_[i][j] = S;
         }
     }
 }
 
-void FSRModel::setThetaMatrix() {
+MatrixXd FSRModel::getThetaMatrix(int W) {
+    MatrixXd tmp_theta = MatrixXd::Zero(n_CV_*(P_-W), n_MV_*M_);
     for (int i = 0; i < n_CV_; i++) {
         for (int j = 0; j < n_MV_; j++) {
-            theta_.block(i*(P_-W_), j*M_, P_-W_, M_) = pp_SR_mat_[i][j]; // The elements are already sliced
+            tmp_theta.block(i*(P_-W), j*M_, P_-W, M_) = pp_SR_mat_[i][j](Eigen::seq(W, Eigen::indexing::last), Eigen::seq(0, Eigen::indexing::last)); 
         }
     }
+    return tmp_theta; 
 }
 
-void FSRModel::setPhiMatrix() {
+MatrixXd FSRModel::getPhiMatrix(int W) {
+    MatrixXd tmp_phi = MatrixXd::Zero(n_CV_*(P_-W), n_MV_*(N_-W-1));
     for (int i = 0; i < n_CV_; i++) {
         for (int j = 0; j < n_MV_; j++) { 
             double sn = pp_SR_vec_[i][j](Eigen::indexing::last); // S(N)
-            
-            for (int pad = 0; pad < P_; pad++) {
-                // Extract S-coefficients
-                VectorXd vec = pp_SR_vec_[i][j](Eigen::seq(W_ + 1 + pad, Eigen::indexing::last)); // Accessing [S(W+1+k), ..., S(N)]
-                
+            for (int pad = 0; pad < (P_-W); pad++) {
+                // Slicing prior s-coefficients
+                VectorXd vec = pp_SR_vec_[i][j](Eigen::seq(W + pad, Eigen::indexing::last - 1)); // Accessing [S(W+k), ..., S(N-1)]
                 VectorXd pad_vec = PadVec(vec, pad, sn); // pad_vec.rows() = N-W-1
                 int size = pad_vec.rows(); 
+                
                 // Write to phi-matrix
-                phi_((i * P_) + pad, Eigen::seq(j * size, (j+1) * size - 1)) = pad_vec.transpose();
+                tmp_phi((i * (P_-W)) + pad, Eigen::seq(j * size, (j+1) * size - 1)) = pad_vec.transpose();
             }
         }
     }
+    return tmp_phi;
 }
 
 VectorXd FSRModel::PadVec(VectorXd& vec, int pad, double sn) {
-    if (pad == 0) {
-        return vec;
-    }
-
+    // Pad vectors with pad number of sn. 
     VectorXd sn_vec = VectorXd::Constant(pad, sn);
     VectorXd pad_vec(vec.size() + sn_vec.size());
     pad_vec << 
@@ -153,19 +146,22 @@ VectorXd FSRModel::PadVec(VectorXd& vec, int pad, double sn) {
     return pad_vec; 
 }
 
-void FSRModel::setPsi() {
+MatrixXd FSRModel::getPsi(int W) {
+    MatrixXd tmp_psi = MatrixXd::Zero(n_CV_*(P_-W), n_MV_);
     for (int i = 0; i < n_CV_; i++) {
         for (int j = 0; j < n_MV_; j++) {
-            VectorXd vec = VectorXd::Constant(P_-W_, pp_SR_vec_[i][j](Eigen::indexing::last));
-            psi_.block(i*(P_-W_), j, P_-W_, 1) = vec;
+            VectorXd vec = VectorXd::Constant(P_-W, pp_SR_vec_[i][j](Eigen::indexing::last));
+            tmp_psi.block(i*(P_-W), j, P_-W, 1) = vec;
         }
     }
+    return tmp_psi;
 }
 
-VectorXd FSRModel::getDuTilde() {
+VectorXd FSRModel::getDuTilde() const { // Flattning du_tilde_mat, dependant on W
     VectorXd du_tilde = VectorXd::Zero(n_MV_*(N_-W_-1));
+    MatrixXd du_tilde_sliced = du_tilde_mat_.block(0, 0, n_CV_, N_-W_-1);
     for (int i = 0; i < n_MV_; i++) {
-        du_tilde.block(i * (N_-W_-1), 0, N_-W_-1, 1) = du_tilde_mat_.row(i).transpose();
+        du_tilde.block(i * (N_-W_-1), 0, N_-W_-1, 1) = du_tilde_sliced.row(i).transpose();
     }
     return du_tilde;
 }
@@ -173,24 +169,39 @@ VectorXd FSRModel::getDuTilde() {
 void FSRModel::UpdateU(const VectorXd& du) { // du = omega_u * z
     // Updating U(k-1)
     u_K_ += du; 
-
     // Updating U(n)
-    VectorXd du_n = du_tilde_mat_.rightCols(1);
+    VectorXd du_n = du_tilde_mat_.col(N_-2-W_); // Access last - W elem 
     u_ += du_n;
-
     // Update du_tilde by left shift, adding the optimized du
-    MatrixXd old_du = du_tilde_mat_.leftCols(N_-W_-2);
+    MatrixXd old_du = du_tilde_mat_.leftCols(N_-2-W_);
     du_tilde_mat_.block(0, 0, n_MV_, 1) = du;
-    du_tilde_mat_.block(0, 1, n_MV_, N_-W_-2) = old_du;
+    du_tilde_mat_.block(0, 1, n_MV_, N_-2-W_) = old_du;
 }
 
-SparseXd FSRModel::getOmegaY() {
+SparseXd FSRModel::getOmegaY() const {
     MatrixXd omega_dense = MatrixXd::Zero(n_CV_, n_CV_ * P_);
     for (int i = 0; i < n_CV_; i++) {
         omega_dense(i, i * P_) = 1; 
     }
     return omega_dense.sparseView();
 }  
+
+VectorXd FSRModel::setInitY(std::vector<double> init_y, int predictions) {
+    VectorXd y_init = VectorXd::Zero(n_CV_ * predictions);
+    for (int cv = 0; cv < n_CV_; cv++) {
+        y_init.block(cv * predictions, 0, predictions, 1) = VectorXd::Constant(predictions, init_y[cv]);
+    }
+    return y_init;
+}
+
+void FSRModel::setDuTildeMat(const MatrixXd& mat) { 
+    // Update u_
+    for (int i = 0; i < mat.cols(); i++) {
+        VectorXd vec = mat.col(i);
+        u_ -= vec;
+    }
+    du_tilde_mat_ = mat.block(0, 0, n_CV_, N_-1-W_); 
+}
 
 // Print functions: 
 void FSRModel::PrintTheta() const {
@@ -201,13 +212,10 @@ void FSRModel::PrintTheta() const {
 
 void FSRModel::PrintPhi() const {
     std::cout << "Phi : " << "(" << phi_.rows() << ", " << phi_.cols() << ")" << std::endl;
-    
     for (int i = 0; i < phi_.rows(); i++) {
         std::cout << "Row = pad: " << i << std::endl;
-       
         std::cout << phi_(i, Eigen::seq(0, N_-W_-1-1)) << std::endl;
         std::cout << std::endl;
-        
         std::cout << phi_(i, Eigen::seq(N_-W_-1, Eigen::indexing::last)) << std::endl;
         std::cout << std::endl;
     }
@@ -226,6 +234,7 @@ void FSRModel::PrintActuation() const {
     std::cout << "U_tilde:" << std::endl;
     std::cout << du_tilde_mat_ << std::endl;
     std::cout << std::endl;
-    std::cout << "U(k-N):" << std::endl;
+    std::cout << "U(k+W-N):" << std::endl;
     std::cout << u_ << std::endl;
+
 }

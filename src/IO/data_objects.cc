@@ -8,12 +8,8 @@
 #include "IO/data_objects.h"
 #include "IO/json_specifiers.h"
 
-#include <vector>
 #include <stdexcept>
 #include <iostream>
-
-#include <nlohmann/json.hpp>
-#include <Eigen/Dense>
 
 /**
  * @brief Convert a nlohmann::json::array to Eigen::VectorXd
@@ -109,7 +105,7 @@ MVData::MVData(const json& mv_data, int n_MV) {
         throw std::invalid_argument("n_MV does not coincide with MV");
     }
     for (int inputs = 0; inputs < n_MV; inputs++) {
-        json input_data = mv_data.at(inputs); // Selecting one input
+        json input_data = mv_data.at(inputs);
         Inputs.push_back(input_data.at(kInput));
         Inits.push_back(input_data.at(kInit));
         Units.push_back(input_data.at(kUnit));        
@@ -118,7 +114,7 @@ MVData::MVData(const json& mv_data, int n_MV) {
 
 MPCConfig::MPCConfig() : P(), M(), W(), bias_update() {}
 MPCConfig::MPCConfig(const json& sce_data) {
-    json mpc_data = sce_data.at(kMPC); // Extract data marked MPC. 
+    json mpc_data = sce_data.at(kMPC);
     P = mpc_data.at(kP);
     M = mpc_data.at(kM);
     W = mpc_data.at(kW);
@@ -138,7 +134,7 @@ MPCConfig::MPCConfig(const json& sce_data) {
             throw std::invalid_argument("Negative turning arguments in Q and R");
         } else {
             RoH(i) = mpc_data.at(kRoH).at(i);
-            RoL(i) = mpc_data.at(kRoH).at(i);
+            RoL(i) = mpc_data.at(kRoL).at(i);
         }
     }
     for (int i = 0; i < n_MV; i++) {

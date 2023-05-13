@@ -19,15 +19,17 @@
 #include <iostream>
 
 /**
- * @brief 
+ * @brief Produce general input for Open loop simulation. Reference becomes input for OpenLoop simulation.
  * 
- * @param du [Eigen::MatrixXd]
- * @param ref_vec [std::vector<double>]
- * @param T [int]
- * @param step [std::vector<double>]
+ * @param ref_str reference string
+ * @param T MPC horizon
+ * @param step Determines how actuation shall step from 0 to reference input. 
+ * @return Eigen::MatrixXd change in actuation.
  */
-static void AllocateStepReference(MatrixXd& du, const std::vector<double>& ref_vec, const std::vector<double>& step, int T) { 
-    du.resize(int(ref_vec.size()), T);
+static MatrixXd setStepActuation(const string& ref_str, const std::vector<double>& step, int n_CV, int T) { 
+    // Split string to std::vector
+    std::vector<double> ref_vec = ParseRefString(ref_str, n_CV); 
+    MatrixXd du = MatrixXd::Zero(int(ref_vec.size()), T);
     for (int i = 0; i < du.rows(); i++) {
         double sum = 0;
         for (int j = 0; j < T; j++) {
@@ -40,27 +42,37 @@ static void AllocateStepReference(MatrixXd& du, const std::vector<double>& ref_v
             sum += step[i];
         }
     }
+    return du;
 }
 
 /**
- * @brief Allocates and initialises reference
+ * @brief set Reference variable based on string
  * 
- * @param ref_vec [std::vector] Vector holding reference values
- * @param T [int] MPC horizon
- * @param P [int] Prediction horizon
+ * @param ref_str reference string
+ * @param T MPC horizon
+ * @param P Prediction horizon
+ * @param n_CV number of controlled variables
+ * @return MatrixXd reference variable
  */
-static VectorXd* AllocateConstReference(const std::vector<double>& ref_vec, int T, int P) { // Cannot reinitialize pointer via pass-by-pointer
-    int size = int(ref_vec.size()); 
-    VectorXd* y_ref = new VectorXd[size];
+static MatrixXd setRef(const string& ref_str, int T, int P, int n_CV) {
+    // ref = R^(n_CV x T + P)
+    // Split string to std::vector
+    std::vector<double> ref_vec = ParseRefString(ref_str, n_CV); 
+    
+    int size = int(ref_vec.size());
+    MatrixXd ref = MatrixXd::Zero(size, T + P);
+    if (size != n_CV) {
+        throw std::invalid_argument("Number of references do not coincide with number of n_CV, expected: " + std::to_string(n_CV));
+    }
 
     for (int i = 0; i < size; i++) {
-        y_ref[i] = VectorXd::Constant(T + P, ref_vec.at(i)); // Takes predictions into account!
+        ref.row(i) = VectorXd::Constant(T + P, ref_vec.at(i)); // Takes predictions into account!
     }
-    return y_ref;
+    return ref;
 }
 
-void OpenLoopFSRM(const string& system, const std::vector<double>& ref_vec, int T) {
-    const string sim = "sim_open_loop_" + system; // Simulation file name
+void OpenLoopFSRM(const string& sys, const string ref_str, int T) {
+    const string sim = "sim_open_loop_" + sys; // Simulation file name
     const string sim_path = "../data/simulations/" + sim + ".json";
 
     // System variables:
@@ -69,24 +81,20 @@ void OpenLoopFSRM(const string& system, const std::vector<double>& ref_vec, int 
     std::map<string, int> m_map;
 
     // Scenario variables:
-    VectorXd z_min; /** Lower constraint vector */
-    VectorXd z_max; /** Upper constraint vector */
+    VectorXd z_min, z_max; /** Constraint vectors */
     MPCConfig conf; /** MPC configuration */
 
     // Parse information:
-    ParseOpenLoop(system, m_map, cvd, mvd);
+    ParseOpenLoop(sys, m_map, cvd, mvd);
 
     // Select dynamical model: 
     FSRModel fsr(cvd.getSR(), m_map, mvd.Inits, cvd.getInits());
 
-    // Actuation: Interface to FSRModel is change in actuation.
-    MatrixXd du;
+    // Actuation: Reference in Open Loop Simulation becomes actuation.
     std::vector<double> step {5, 25};
-    AllocateStepReference(du, ref_vec, step, T); 
-    
-    MatrixXd u_mat = MatrixXd::Zero(fsr.getN_MV(), T);
-    MatrixXd y_pred = MatrixXd::Zero(fsr.getN_CV(), T);
-
+    MatrixXd du = setStepActuation(ref_str, step, m_map[kN_CV], T); 
+    MatrixXd u_mat = MatrixXd::Zero(fsr.getN_MV(), T), y_pred = MatrixXd::Zero(fsr.getN_CV(), T);
+ 
     for (int k = 0; k < T; k++) {
         // Store optimal du and y_pref: Before update!
         u_mat.col(k) = fsr.getUK();
@@ -98,16 +106,17 @@ void OpenLoopFSRM(const string& system, const std::vector<double>& ref_vec, int 
 
     // Serialize:
     try {
-        SerializeOpenLoop(sim_path, system, cvd, mvd, y_pred, u_mat, fsr, T); 
+        SerializeOpenLoop(sim_path, sys, cvd, mvd, y_pred, u_mat, fsr, T); 
     }
     catch(std::exception& e) {
         std::cout << e.what() << std::endl;
     }
 }
 
-void MPCSimFSRM(const string& sce, const std::vector<double>& ref_vec, bool new_sim, int T) {
-    const string sim = "sim_" + sce;
-    const string sce_path = "../data/scenarios/sce_" + sce + ".json";
+void MPCSimFSRM(const string& sys, const string& ref_vec, bool new_sim, int T) {
+    // Mapping to Data folder
+    const string sim = "sim_" + sys;
+    const string sce_path = "../data/scenarios/sce_" + sys + ".json";
     const string sim_path = "../data/simulations/" + sim + ".json";
 
     // System variables:
@@ -116,18 +125,17 @@ void MPCSimFSRM(const string& sce, const std::vector<double>& ref_vec, bool new_
     std::map<string, int> m_map;
 
     // Scenario variables:
-    VectorXd z_min; /** Lower constraint vector */
-    VectorXd z_max; /** Upper constraint vector */
-    MPCConfig conf; /** MPC configuration */
+    VectorXd z_min, z_max; /** Constraint vectors */
+    MPCConfig conf; 
     MatrixXd du_tilde; 
 
     // Parse information:
     try {
         if (new_sim) {
             ParseNew(sce_path, m_map, cvd, mvd, conf, z_min, z_max);
-            du_tilde = MatrixXd::Zero(m_map[kN_MV], m_map[kN]-conf.W-1);
         } else {
-            Parse(sce_path, sim_path, m_map, cvd, mvd, conf, z_min, z_max, du_tilde);
+            // In order to change offset in u and y, this cvd, mvd and du_tilde need to be update here.
+            Parse(sce_path, sim_path, m_map, cvd, mvd, conf, z_min, z_max, du_tilde); 
         }
     }
     catch(std::exception& e) {
@@ -135,38 +143,40 @@ void MPCSimFSRM(const string& sce, const std::vector<double>& ref_vec, bool new_
     }
     
     // FSRM:
-    FSRModel fsr(cvd.getSR(), m_map, conf.P, conf.M, conf.W, mvd.Inits, cvd.getInits());
-    fsr.setDuTildeMat(du_tilde);
-
+    MPCConfig sim_conf = conf;
+    FSRModel* fsr_cost;
+    bool reduced_cost = (conf.W != 0); // Simulate smaller QP
+    if (reduced_cost) {
+        fsr_cost = new FSRModel(cvd.getSR(), m_map, conf, mvd.Inits, cvd.getInits());
+        sim_conf.W = 0;
+    } 
+    FSRModel fsr_sim(cvd.getSR(), m_map, sim_conf, mvd.Inits, cvd.getInits());
+    if (!new_sim) {
+        fsr_sim.setDuTildeMat(du_tilde); 
+        if (reduced_cost) {fsr_cost->setDuTildeMat(du_tilde); }
+    }
+    fsr_sim.PrintTheta();
+    
     // MPC variables:
-    MatrixXd u_mat; /** Optimized actuation, (n_MV, T) */
-    MatrixXd y_pred; /** Predicted output (n_CV, T)*/
+    // MatrixXd u_mat, y_pred, ref = setRef(ref_vec, T, conf.P, m_map[kN_CV]); 
+    // /** Optimized actuation, (n_MV, T) */ /** Predicted output (n_CV, T)*/ /** Reference */
 
-    // Reference: 
-    if (int(ref_vec.size()) != m_map[kN_CV]) {
-        throw std::invalid_argument("Number of references do not coincide with constrained variables");
-    }
-    VectorXd* y_ref = AllocateConstReference(ref_vec, T, conf.P);
-
-    // Solver: 
-    try {
-        SRSolver(T, u_mat, y_pred, fsr, conf, z_min, z_max, y_ref);
-        delete[] y_ref;
-    }
-    catch(std::exception& e) {
-        std::cout << e.what() << std::endl;
-    }
-
-    // Serializing: 
-    try {
-        if (new_sim) {
-            SerializeSimulationNew(sim_path, sce, cvd, mvd, 
-               y_pred, u_mat, z_min, z_max, fsr, T);
-        } else {
-            SerializeSimulation(sim_path, y_pred, u_mat, T);
-        }
-    }
-    catch(std::exception& e) {
-        std::cout << e.what() << std::endl;
-    }
+    // try { // Solve
+    //     if (reduced_cost) {
+    //         SRSolver(T, u_mat, y_pred, fsr_sim, *fsr_cost, conf, z_min, z_max, ref);
+    //         delete fsr_cost;
+    //     } else {
+    //         SRSolver(T, u_mat, y_pred, fsr_sim, conf, z_min, z_max, ref);
+    //     }
+        
+    //     if (new_sim) { // Serialize
+    //         SerializeSimulationNew(sim_path, sys, cvd, mvd, 
+    //            y_pred, u_mat, z_min, z_max, ref, fsr_sim, T);
+    //     } else {
+    //         SerializeSimulation(sim_path, y_pred, u_mat, ref, T);
+    //     }
+    // }
+    // catch(std::exception& e) {
+    //     std::cout << e.what() << std::endl;
+    // }
 }

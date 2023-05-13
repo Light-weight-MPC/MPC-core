@@ -1,7 +1,6 @@
 
 ## Input-Output, IO formatting
-
-This module handles the inputs and outputs of the Light-Weight software, in fact the json data files. 
+This module handles the inputs and outputs of the MPC-core, in fact the json data files. 
 
 ### Input format
 - A json file defining **the system** (states, inputs, step coefficients and references)
@@ -109,6 +108,7 @@ NB! The indicator for the constraints is only used for readability and is not pa
  "T": int,
  "n_CV": int,
  "n_MV": int, 
+ "P": int, 
  "du_tilde" : [[du11, du12, du13, ... , du1(N-1)],
          [du21, du22, du23, ... , du2(N-1)], 
          ... , 
@@ -120,7 +120,8 @@ NB! The indicator for the constraints is only used for readability and is not pa
          "unit": string, 
          "c": [low, high] (double),
          "y": [y1, y2, y3, ... , yT], (Reference model simulation)
-         "y_pred": [y1, y2, y3, ... , yT] (Predicted model simulation)
+         "y_pred": [y1, y2, y3, ... , yT], (Predicted model simulation)
+         "ref": [r1, r2, ..., rT]
       }, 
          ... , 
       { 
@@ -128,7 +129,8 @@ NB! The indicator for the constraints is only used for readability and is not pa
          "unit": string, 
          "c": [low, high] (double),
          "y": [y1, y2, y3, ... , yT], (Reference model simulation)
-         "y_pred": [y1, y2, y3, ... , yT] (Predicted model simulation)
+         "y_pred": [y1, y2, y3, ... , yT], (Predicted model simulation)
+         "ref": [r1, r2, ..., rT]
       }
    ],
 

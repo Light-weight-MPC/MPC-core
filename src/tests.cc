@@ -68,21 +68,18 @@ void TestSerializeScenario(const string& sce, const string& sys, const string& S
     }
 }
 
-void TestSimulate() {
-    json ref = json::object();
-    ref["ref"] = {3800, 70};
-    string ref_str = to_string(ref);
-    
-    string sce = "test";
-    int T = 180;
+void TestSimulate(const string& sys, const string& ref_vec, int T) {
+    string sce_name = "test";
 
-    json scenario = ReadJson("../data/scenarios/sce_SingleWell.json");
+    string sce_filepath = "../data/scenarios/sce_" + sys + ".json";
+    json scenario = ReadJson(sce_filepath);
     string sce_file = to_string(scenario);
 
-    json system = ReadJson("../data/systems/SingleWell.json");
+    string sys_filepath = "../data/systems/" + sys + ".json";
+    json system = ReadJson(sys_filepath);
     string sys_file = to_string(system);
 
-    string data = simulate(sce_file, sys_file, sce, ref_str, T);
+    string data = simulate(sce_file, sys_file, sce_name, ref_vec, T);
     
     std::cout << data << std::endl;
 }
