@@ -19,12 +19,12 @@
 using VectorXd = Eigen::VectorXd;
 using MatrixXd = Eigen::MatrixXd;
 /**
- * @brief Solving the condensed optimalization problem using OSQP-Eigen for W = 0
+ * @brief Solving the condensed positive semi-definite optimalization problem using OSQP-Eigen for W = 0
  * 
  * @param T MPC horizon
  * @param u_mat Optimized u, filled by reference
  * @param y_pred Predicted y, filled by reference
- * @param fsr FSRModel, finite step response model 
+ * @param fsr Simulation and cost FSRM
  * @param conf MPC configuration
  * @param z_min lower constraint vector
  * @param z_max upper constraint vector
@@ -34,7 +34,7 @@ void SRSolver(int T, MatrixXd& u_mat, MatrixXd& y_pred, FSRModel& fsr, const MPC
              const VectorXd& z_max, const MatrixXd& ref);
 
 /**
- * @brief Solving the condensed optimalization problem using OSQP-Eigen for W != 0
+ * @brief Solving the condensed positive semi-definite optimalization problem using OSQP-Eigen for W != 0
  * 
  * @param T MPC horizon
  * @param u_mat Optimized u, filled by reference
@@ -47,6 +47,37 @@ void SRSolver(int T, MatrixXd& u_mat, MatrixXd& y_pred, FSRModel& fsr, const MPC
  * @param ref Output reference data
  */
 void SRSolver(int T, MatrixXd& u_mat, MatrixXd& y_pred, FSRModel& fsr_sim, FSRModel& fsr_cost, const MPCConfig& conf, const VectorXd& z_min, 
+             const VectorXd& z_max, const MatrixXd& ref);
+
+/**
+ * @brief Solving the condensed positive semi-definite optimalization problem without slack for W = 0
+ * 
+ * @param T MPC horizon
+ * @param u_mat Optimized u, filled by reference
+ * @param y_pred Predicted y, filled by reference
+ * @param fsr Simulation and cost FSRM
+ * @param conf MPC configuration
+ * @param z_min lower constraint vector
+ * @param z_max upper constraint vector
+ * @param ref Output reference data
+ */
+void SRSolverWoSlack(int T, MatrixXd& u_mat, MatrixXd& y_pred, FSRModel& fsr, const MPCConfig& conf, const VectorXd& z_min, 
+             const VectorXd& z_max, const MatrixXd& ref);
+
+/**
+ * @brief Solving the condensed positive semi-definite optimalization problem without slack variable for W != 0
+ * 
+ * @param T MPC horizon
+ * @param u_mat Optimized u, filled by reference
+ * @param y_pred Predicted y, filled by reference
+ * @param fsr_sim Simulation model
+ * @param fsr_cost MPC model
+ * @param conf MPC configuration
+ * @param z_min lower constraint vector
+ * @param z_max upper constraint vector
+ * @param ref Output reference data
+ */
+void SRSolverWoSlack(int T, MatrixXd& u_mat, MatrixXd& y_pred, FSRModel& fsr_sim, FSRModel& fsr_cost, const MPCConfig& conf, const VectorXd& z_min, 
              const VectorXd& z_max, const MatrixXd& ref);
 
 #endif // SOLVERS_H

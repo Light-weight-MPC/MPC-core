@@ -32,20 +32,6 @@ static void FillVector(json& vector, const MatrixXd& mat, int row) {
     }
 }
 
-static json SliceVector(json& vector, int start, int end) {
-    json vec = json::array();
-
-    if (start > end) {
-        std::invalid_argument("Start index is higher than end index");
-    } if (end > vector.size()) {
-        std::out_of_range("End index is out of range");
-    }
-    for (int i = start; i < end; i++) {
-        vec.push_back(vector[i]);
-    }
-    return vec;
-}
-
 /**
  * @brief Formats the plain data in simulation file
  * 
@@ -60,6 +46,7 @@ static void SerializeSimData(json& data, const string& scenario, const FSRModel&
     data[kN_CV] = fsr.getN_CV();
     data[kN_MV] = fsr.getN_MV(); 
     data[kP] = fsr.getP();
+    data[kM] = fsr.getM();
 
     json du_tilde = json::array();
     for (int i = 0; i < fsr.getN_MV(); i++) {
@@ -215,16 +202,16 @@ static void SerializeConstraints(json& data, const VectorXd& l_du, const VectorX
 }
 
 /**
- * @brief 
+ * @brief Serialize the controller tuning
  * 
- * @param data 
- * @param mpc_m 
- * @param Q 
- * @param R 
- * @param Ro 
- * @param bias_update 
+ * @param data json object to be filled
+ * @param mpc_m std::map holding model parameters
+ * @param Q Output error penalty
+ * @param R Acuation penalty
+ * @param Ro slack penalty
+ * @param bias_update integral effect
  */
-static void SerializeMPC(json& data, std::map<string, int> mpc_m, const VectorXd& Q, const VectorXd& R, const VectorXd& Ro, bool bias_update) {
+static void SerializeTuning(json& data, std::map<string, int> mpc_m, const VectorXd& Q, const VectorXd& R, const VectorXd& Ro, bool bias_update) {
     json obj = json::object();
     obj[kP] = mpc_m[kP];
     obj[kM] = mpc_m[kM];
@@ -275,27 +262,28 @@ void SerializeSimulation(const string& write_path, const MatrixXd& y_pred, const
                         const MatrixXd& ref, int T) {
     json sim_data = ReadJson(write_path); // Assume this file already exists.
     int old_P = int(sim_data.at(kP));
-    int old_T = int(sim_data.at(kT));
-
-    sim_data[kT] = old_T + T; // Update MPC horizon
+    sim_data.at(kT) = T + int(sim_data.at(kT)); // Update MPC horizon
     
     json cv_data = sim_data.at(kCV), mv_data = sim_data.at(kMV);
     int i = 0;
     for (auto& cv : cv_data) {
-        json old_predictions = SliceVector(cv[kY_pred], 0, old_T); // Slice away Predictions
-        FillVector(old_predictions, y_pred, i); // Update Y_pred
-        cv[kY_pred] = old_predictions;
+        json predictions = cv[kY_pred];
+        predictions.erase(predictions.end() - old_P, predictions.end()); // Slice away P predictions
+        FillVector(predictions, y_pred, i); // Update Y_pred
+        cv[kY_pred] = predictions;
 
-        json old_ref = SliceVector(cv[kRef], 0, old_T); // Update reference
-        FillVector(old_ref, ref, i);
-        cv[kRef] = old_ref; 
+        json reference = cv[kRef];
+        reference.erase(reference.end() - old_P, reference.end()); //Slice away P references
+        FillVector(reference, ref, i);
+        cv[kRef] = reference; 
         i++;
     }
     i = 0;
     for (auto& mv : mv_data) {
-        json old_actuations = SliceVector(mv[kU], 0, old_T);
-        FillVector(old_actuations, u_mat, i); // Update U
-        mv[kU] = old_actuations; 
+        json actuations = mv[kU];
+        // Might slice away.
+        FillVector(actuations, u_mat, i); // Update U
+        mv[kU] = actuations; 
         i++;
     }
 
@@ -355,7 +343,7 @@ void SerializeScenario(const string& write_path, const string& scenario, const s
     }
 
     data[kSystem] = system; // Write system
-    SerializeMPC(data, mpc_m, Q, R, Ro, bias_update);
+    SerializeTuning(data, mpc_m, Q, R, Ro, bias_update);
     SerializeConstraints(data, l_du, l_u, l_y, u_du, u_u, u_y, n_CV, n_MV);
     WriteJson(data, write_path);
 }
