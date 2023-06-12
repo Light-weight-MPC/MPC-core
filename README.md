@@ -1,6 +1,7 @@
 # MPC-simulator: C++, Python, Webassembly
 This is a simulation software base for automating MPC simulations on Finite Step Response Models. All data files, including the model description and controller definition, are defined using JSON format making the software easily integratable. Having defined the input files, one can simulate the controller from the command line, calling make.sh using CMake and GNU compiler. In order to visualize the simulation data, plotting functionality is implemented in Python. Additionally, in order to interface the software to web-applications, the software is compiled to wasm format calling emcc.sh using the Emscripten compiler. 
 
+Operating system: Linux, MacOS
 ## Modules
 - [data](data/README.md): System, scenario and simulation files.
 - [MPC](src/MPC/README.md): Solving the MPC problems.
@@ -49,15 +50,15 @@ conda install -n env -c conda-forge cli11
 ```console
 conda env export > env/env.yml
 ```
-- Build and run program, NB! make.sh calls binary ./mpc_simulator
+- Build and run program, NB! lightweight.sh calls binary ./mpc_simulator
 Arguments:
 - [-T int] mpc_horizon: Simulate scenario for the given mpc_horizon
 - [-s string] scenario_name: Scenario file to be simulated
 - [-r string] reference vector
 - [-n bool] new simulation
 ```console
-chmod +x setup.sh                       // Set execute permission
-sh make.sh -T mpc_horizon -s sce -r [ref] -n
+chmod +x lightweight.sh                       // Set execute permission
+sh lightweight.sh -T mpc_horizon -s sce -r [ref] -n
 ```
 ### Webassembly
 Light-weight MPC uses the *Emscripten* compiler in order to compile the C++-code to *Webassembly* which can be reached from a website using JavaScript.
@@ -96,3 +97,17 @@ One can choose to either open Jupyter-Notebook and run *vis.ipynb*. Alternativel
 ```console
 python3 vis/plot.py -s "Simulation"
 ```
+
+### Open loop simulation
+When facing a new model to try to fit tuning parameters too. It might be useful to assess the open loop response. The simulator can produce an open loop simulation by calling another build script: 
+
+Arguments:
+- [-T int] mpc_horizon: Simulate scenario for the given mpc_horizon
+- [-s string] scenario_name: Scenario file to be simulated
+- [-r string] Actuation vector 
+- [-a string] Step vector
+```console
+chmod +x openloop.sh                       // Set execute permission
+sh openloop.sh -T mpc_horizon -s sce -r [ref] -a [step]
+```
+In an open loop simulation the actuation is determined without the use of a controller. Here the actuation vector determines the maximum value the actuation will reach. The corresponding step vector determines how the actuation increases each simulation step. By passing an actuation and a step vector equal to 1 a step response is applied to the system. 

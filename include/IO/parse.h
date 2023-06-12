@@ -87,22 +87,11 @@ void Parse(const string& sce_filepath, const string& sim_filepath, std::map<stri
 void ParseOpenLoop(const string& system, std::map<string, int>& m_map, CVData& cvd, MVData& mvd);
 
 /**
- * @brief Parse JSON reference to Eigen::MatrixXd, used in Web application
- * 
- * @param ref_str JSON formatted string
- * @param T MPC horison 
- * @param P Prediction horizon
- * @return Allocated Eigen::MatrixXd holding references
- */
-MatrixXd ParseReferenceStr(string ref_str, int T, int P);
-
-/**
  * @brief Parse string to std::vector<double>. Throws errors if invalid arg.
  * 
  * @param ref_str reference string 
- * @param n_CV number of controlled variables
  * @return std::vector<double> converted string 
  */
-std::vector<double> ParseRefString(const string& ref_str, int n_CV);
+std::vector<double> ParseRefString(const string& ref_str);
 
 #endif // PARSE_H

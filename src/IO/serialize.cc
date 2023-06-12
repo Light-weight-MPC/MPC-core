@@ -209,14 +209,12 @@ static void SerializeConstraints(json& data, const VectorXd& l_du, const VectorX
  * @param Q Output error penalty
  * @param R Acuation penalty
  * @param Ro slack penalty
- * @param bias_update integral effect
  */
-static void SerializeTuning(json& data, std::map<string, int> mpc_m, const VectorXd& Q, const VectorXd& R, const VectorXd& Ro, bool bias_update) {
+static void SerializeTuning(json& data, std::map<string, int> mpc_m, const VectorXd& Q, const VectorXd& R, const VectorXd& Ro) {
     json obj = json::object();
     obj[kP] = mpc_m[kP];
     obj[kM] = mpc_m[kM];
     obj[kW] = mpc_m[kW];
-    obj[kBu] = bias_update;
 
     json q = json::array(), r = json::array(), rol = json::array(), roh = json::array();
     for (int i = 0; i < Q.rows(); i++) {
@@ -262,18 +260,19 @@ void SerializeSimulation(const string& write_path, const MatrixXd& y_pred, const
                         const MatrixXd& ref, int T) {
     json sim_data = ReadJson(write_path); // Assume this file already exists.
     int old_P = int(sim_data.at(kP));
+    int old_M = int(sim_data.at(kM));
     sim_data.at(kT) = T + int(sim_data.at(kT)); // Update MPC horizon
     
     json cv_data = sim_data.at(kCV), mv_data = sim_data.at(kMV);
     int i = 0;
     for (auto& cv : cv_data) {
         json predictions = cv[kY_pred];
-        predictions.erase(predictions.end() - old_P, predictions.end()); // Slice away P predictions
+        predictions.erase(predictions.end() - old_P - 1, predictions.end()); // Slice away P predictions
         FillVector(predictions, y_pred, i); // Update Y_pred
         cv[kY_pred] = predictions;
 
         json reference = cv[kRef];
-        reference.erase(reference.end() - old_P, reference.end()); //Slice away P references
+        reference.erase(reference.end() - old_P - 1, reference.end()); //Slice away P references
         FillVector(reference, ref, i);
         cv[kRef] = reference; 
         i++;
@@ -281,7 +280,7 @@ void SerializeSimulation(const string& write_path, const MatrixXd& y_pred, const
     i = 0;
     for (auto& mv : mv_data) {
         json actuations = mv[kU];
-        // Might slice away.
+        actuations.erase(actuations.end() - old_M, actuations.end()); // Slice away M predictions
         FillVector(actuations, u_mat, i); // Update U
         mv[kU] = actuations; 
         i++;
@@ -318,7 +317,7 @@ void SerializeOpenLoop(const string& write_path, const string& scenario, const C
 ////////////////////////////////
 
 void SerializeScenario(const string& write_path, const string& scenario, const string& system, const string& sys_path, std::map<string, int> mpc_m,
-                     const VectorXd& Q, const VectorXd& R, const VectorXd& Ro, bool bias_update, const VectorXd& l_du, 
+                     const VectorXd& Q, const VectorXd& R, const VectorXd& Ro, const VectorXd& l_du, 
                      const VectorXd& l_u, const VectorXd& l_y, const VectorXd& u_du, const VectorXd& u_u, const VectorXd& u_y,
                      int n_CV, int n_MV) {
     json data;
@@ -343,7 +342,7 @@ void SerializeScenario(const string& write_path, const string& scenario, const s
     }
 
     data[kSystem] = system; // Write system
-    SerializeTuning(data, mpc_m, Q, R, Ro, bias_update);
+    SerializeTuning(data, mpc_m, Q, R, Ro);
     SerializeConstraints(data, l_du, l_u, l_y, u_du, u_u, u_y, n_CV, n_MV);
     WriteJson(data, write_path);
 }

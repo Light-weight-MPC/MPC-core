@@ -3,14 +3,14 @@
 # flags: 
 #     -d mjs file destination
 # 
-# ex: sh emcc.sh -d ../frontend/src
+# ex: sh emcc.sh -d ../Web-application/src
 
 # NB! For linux and windows the compiler needs to be sourced!
 mkdir -p "build_emcc"
 cd build_emcc
 
-# Setting emsdk path, REMOVE THIS LINE!
-echo 'source "/home/gotvinne/emsdk/emsdk_env.sh"' >> $HOME/.bash_profile
+# Enable Emscripten to run in terminal: 
+# -->
 
 while getopts "d:h" flag; 
 do
